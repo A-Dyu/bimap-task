@@ -286,13 +286,8 @@ template <typename Left, typename Right,
         typename CompareLeft = std::less<Left>,
         typename CompareRight = std::less<Right>>
 struct bimap {
-    using left_t = node<Left, left_tag>;
-    using right_t = node<Right, right_tag>;
-    using node_t = binode<Left, Right>;
-
-    using l_ptr = std::shared_ptr<left_t>;
-    using r_ptr = std::shared_ptr<right_t>;
-    using n_ptr = std::shared_ptr<node_t>;
+    using left_t = Left;
+    using right_t = Right;
 
     struct left_iterator;
 
@@ -302,7 +297,7 @@ struct bimap {
 
         friend struct bimap<Left, Right, CompareLeft, CompareRight>;
 
-        right_iterator(r_ptr node) noexcept : base(node) {}
+        right_iterator(std::shared_ptr<node<Right, right_tag>> node) noexcept : base(node) {}
 
         right_iterator& operator++() noexcept {
             return base::template postfix_transform<right_iterator, r_ptr>(*this, tree_t::next);
@@ -340,7 +335,7 @@ struct bimap {
 
         friend struct bimap<Left, Right, CompareLeft, CompareRight>;
 
-        left_iterator(l_ptr node) noexcept : base(node) {}
+        left_iterator(std::shared_ptr<node<Left, left_tag>> node) noexcept : base(node) {}
 
         left_iterator& operator++() noexcept {
             return base::template postfix_transform<left_iterator, l_ptr>(*this, tree_t::next);
@@ -371,7 +366,7 @@ struct bimap {
         }
     };
 
-    bimap() noexcept : l_tree(to_l_ptr(std::make_shared<node_t>())), r_tree(flip(l_tree.get_end())), bimap_size(0) {}
+    bimap() noexcept : l_tree(to_l_ptr(std::make_shared<bi_node>())), r_tree(flip(l_tree.get_end())), bimap_size(0) {}
 
     bimap(bimap const& other): bimap() {
         copy(other);
@@ -404,7 +399,7 @@ struct bimap {
         if (find_left(l_val) != end_left() || find_right(r_val) != end_right()) {
             return end_left();
         }
-        n_ptr new_elem = std::make_shared<node_t>(std::move(l_val), std::move(r_val));
+        bi_ptr new_elem = std::make_shared<bi_node>(std::move(l_val), std::move(r_val));
         insert(new_elem);
         return to_l_ptr(new_elem);
     }
@@ -450,29 +445,29 @@ struct bimap {
     }
 
     Right const& at_left(Left const& key) const {
-        n_ptr ptr = to_n_ptr(l_tree.find(key));
+        bi_ptr ptr = to_n_ptr(l_tree.find(key));
         if (!ptr) {
             throw std::out_of_range("No such key in bimap");
         }
-        return ptr->right_t::get_value();
+        return ptr->r_node::get_value();
     }
 
     Left const& at_right(Right const& key) const {
-        n_ptr ptr = to_n_ptr(r_tree.find(key));
+        bi_ptr ptr = to_n_ptr(r_tree.find(key));
         if (!ptr) {
             throw std::out_of_range("No such key in bimap");
         }
-        return ptr->left_t::get_value();
+        return ptr->l_node::get_value();
     }
 
     Right at_left_or_default(Left const& key) const noexcept {
-        n_ptr ptr = to_n_ptr(l_tree.find(key));
-        return ptr ? ptr->right_t::get_value() : Right();
+        bi_ptr ptr = to_n_ptr(l_tree.find(key));
+        return ptr ? ptr->r_node::get_value() : Right();
     }
 
     Left at_right_or_default(Right const& key) const noexcept {
-        n_ptr ptr = to_n_ptr(r_tree.find(key));
-        return ptr ? ptr->left_t::get_value() : Left();
+        bi_ptr ptr = to_n_ptr(r_tree.find(key));
+        return ptr ? ptr->l_node::get_value() : Left();
     }
 
     left_iterator lower_bound_left(const Left& left) const noexcept {
@@ -560,39 +555,47 @@ struct bimap {
     }
 
 private:
+    using l_node = node<Left, left_tag>;
+    using r_node = node<Right, right_tag>;
+    using bi_node = binode<Left, Right>;
+
+    using l_ptr = std::shared_ptr<l_node>;
+    using r_ptr = std::shared_ptr<r_node>;
+    using bi_ptr = std::shared_ptr<bi_node>;
+
     void copy(bimap const& other) {
         for (auto it = other.begin_left(); it != other.end_left(); it++) {
-            n_ptr ptr = to_n_ptr(it.it_node);
-            insert(ptr->left_t::get_value(), ptr->right_t::get_value());
+            bi_ptr ptr = to_n_ptr(it.it_node);
+            insert(ptr->l_node::get_value(), ptr->r_node::get_value());
         }
     }
 
-    void erase(n_ptr ptr) noexcept {
+    void erase(bi_ptr ptr) noexcept {
         bimap_size--;
         l_tree.erase(to_l_ptr(ptr));
         r_tree.erase(to_r_ptr(ptr));
     }
 
-    void insert(n_ptr const& new_elem) noexcept {
+    void insert(bi_ptr const& new_elem) noexcept {
         bimap_size++;
         l_tree.insert(to_l_ptr(new_elem));
         r_tree.insert(to_r_ptr(new_elem));
     }
 
-    static l_ptr to_l_ptr(n_ptr const& ptr) noexcept {
-        return ptr ? l_ptr(ptr, static_cast<left_t*>(&(*ptr))) : nullptr;
+    static l_ptr to_l_ptr(bi_ptr const& ptr) noexcept {
+        return ptr ? l_ptr(ptr, static_cast<l_node*>(&(*ptr))) : nullptr;
     }
 
-    static r_ptr to_r_ptr(n_ptr const& ptr) noexcept {
-        return ptr ? r_ptr(ptr, static_cast<right_t*>(&(*ptr))) : nullptr;
+    static r_ptr to_r_ptr(bi_ptr const& ptr) noexcept {
+        return ptr ? r_ptr(ptr, static_cast<r_node*>(&(*ptr))) : nullptr;
     }
 
-    static n_ptr to_n_ptr(l_ptr ptr) noexcept {
-        return ptr ? n_ptr(ptr, static_cast<node_t*>(&(*ptr))) : nullptr;
+    static bi_ptr to_n_ptr(l_ptr ptr) noexcept {
+        return ptr ? bi_ptr(ptr, static_cast<bi_node*>(&(*ptr))) : nullptr;
     }
 
-    static n_ptr to_n_ptr(r_ptr ptr) noexcept {
-        return ptr ? n_ptr(ptr, static_cast<node_t*>(&(*ptr))) : nullptr;
+    static bi_ptr to_n_ptr(r_ptr ptr) noexcept {
+        return ptr ? bi_ptr(ptr, static_cast<bi_node*>(&(*ptr))) : nullptr;
     }
 
     static l_ptr flip(r_ptr const& ptr) noexcept {
