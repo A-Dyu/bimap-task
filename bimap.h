@@ -4,20 +4,20 @@
 #include <memory>
 #include <optional>
 #include <random>
-std::mt19937 rnd(1488322);
 
 namespace {
     struct left_tag;
     struct right_tag;
 
     struct priority {
-        priority(): x(rnd()) {}
+        priority() noexcept : x(rnd()) {}
 
         uint32_t get_priority() const noexcept {
             return x;
         }
 
     private:
+        static inline auto rnd = std::mt19937(1488322);
         uint32_t x;
     };
 
@@ -26,7 +26,7 @@ namespace {
         node() = default;
 
         template<typename Y>
-        explicit node(Y val) : value(std::forward<Y>(val)) {}
+        explicit node(Y val) : value(std::move(val)) {}
 
         bool has_value() const noexcept {
             return value.has_value();
@@ -48,7 +48,7 @@ namespace {
         binode() = default;
 
         template<typename L, typename R>
-        binode(L l_val, R r_val) : node<Left, left_tag>(std::forward<L>(l_val)), node<Right, right_tag>(std::forward<R>(r_val)) {}
+        binode(L l_val, R r_val) : node<Left, left_tag>(std::move(l_val)), node<Right, right_tag>(std::move(r_val)) {}
     };
 
     template<typename T, typename Tag, typename Comp>
@@ -58,13 +58,7 @@ namespace {
         using w_ptr = std::weak_ptr<node_t>;
         using s_pair = std::pair<s_ptr, s_ptr>;
 
-        static constexpr Comp comp = Comp();
-
-        static constexpr auto up_comp = [](T const& a, T const& b) {
-            return comp(a, b) || a == b;
-        };
-
-        tree(s_ptr end) : head(end), begin(end), end(end) {}
+        tree(s_ptr end) noexcept : head(end), begin(end), end(end) {}
 
         s_ptr find(T const& val) const noexcept {
             s_ptr t = head;
@@ -172,6 +166,12 @@ namespace {
         friend struct bimap;
 
     private:
+        static constexpr Comp comp = Comp();
+
+        static constexpr auto up_comp = [](T const& a, T const& b) {
+            return comp(a, b) || a == b;
+        };
+
         template<typename F>
         static s_ptr bound(s_ptr ptr, T const& val, F const& bound_comp) noexcept {
             if (!ptr) {
@@ -258,7 +258,7 @@ namespace {
         using ptr = std::shared_ptr<node_t>;
         using tree_t = tree<T, Tag, Comp>;
 
-        base_iterator(ptr node) : it_node(node) {}
+        base_iterator(ptr node) noexcept : it_node(node) {}
 
         T const& operator*() const noexcept {
             return it_node->get_value();
@@ -266,14 +266,14 @@ namespace {
 
     protected:
         template<typename Iterator, typename Ptr>
-        static Iterator prefix_transform(Iterator& cur, std::function<Ptr (Ptr)> transformer) {
+        static Iterator prefix_transform(Iterator& cur, std::function<Ptr (Ptr)> transformer) noexcept {
             Iterator old(cur);
             cur.it_node = transformer(cur.it_node);
             return old;
         }
 
         template<typename Iterator, typename Ptr>
-        static Iterator& postfix_transform(Iterator& cur, std::function<Ptr (Ptr)> transformer) {
+        static Iterator& postfix_transform(Iterator& cur, std::function<Ptr (Ptr)> transformer) noexcept {
             cur.it_node = transformer(cur.it_node);
             return cur;
         }
@@ -302,7 +302,7 @@ struct bimap {
 
         friend struct bimap<Left, Right, CompareLeft, CompareRight>;
 
-        right_iterator(r_ptr node) : base(node) {}
+        right_iterator(r_ptr node) noexcept : base(node) {}
 
         right_iterator& operator++() noexcept {
             return base::template postfix_transform<right_iterator, r_ptr>(*this, tree_t::next);
@@ -340,7 +340,7 @@ struct bimap {
 
         friend struct bimap<Left, Right, CompareLeft, CompareRight>;
 
-        left_iterator(l_ptr node) : base(node) {}
+        left_iterator(l_ptr node) noexcept : base(node) {}
 
         left_iterator& operator++() noexcept {
             return base::template postfix_transform<left_iterator, l_ptr>(*this, tree_t::next);
@@ -381,13 +381,14 @@ struct bimap {
         swap(other);
     }
 
-    bimap& operator=(bimap const& other){
+    bimap& operator=(bimap const& other) {
         if (this != &other) {
             this->~bimap();
             new(this) bimap(other);
         }
         return *this;
     }
+
     bimap& operator=(bimap&& other) noexcept {
         if (this != &other) {
             this->~bimap();
@@ -395,6 +396,7 @@ struct bimap {
         }
         return *this;
     }
+
     template<typename L, typename R,
             typename = std::enable_if<std::is_same_v<std::decay_t<L>, Left>>,
             typename = std::enable_if<std::is_same_v<std::decay_t<R>, Right>>>
@@ -402,7 +404,7 @@ struct bimap {
         if (find_left(l_val) != end_left() || find_right(r_val) != end_right()) {
             return end_left();
         }
-        n_ptr new_elem = std::make_shared<node_t>(std::forward<L>(l_val), std::forward<R>(r_val));
+        n_ptr new_elem = std::make_shared<node_t>(std::move(l_val), std::move(r_val));
         insert(new_elem);
         return to_l_ptr(new_elem);
     }
@@ -437,12 +439,12 @@ struct bimap {
         return static_cast<bool>(ptr);
     }
 
-    left_iterator find_left (Left const& left)  const {
+    left_iterator find_left (Left const& left) const noexcept {
         l_ptr ptr = l_tree.find(left);
         return ptr ? ptr : end_left();
     }
 
-    right_iterator find_right(Right const& right) const {
+    right_iterator find_right(Right const& right) const noexcept {
         r_ptr ptr = r_tree.find(right);
         return ptr ? ptr : end_right();
     }
@@ -463,57 +465,57 @@ struct bimap {
         return ptr->left_t::get_value();
     }
 
-    Right at_left_or_default(Left const& key) const {
+    Right at_left_or_default(Left const& key) const noexcept {
         n_ptr ptr = to_n_ptr(l_tree.find(key));
-        return ptr ? ptr->right_t::get_value() : end_right();
+        return ptr ? ptr->right_t::get_value() : Right();
     }
 
-    Left at_right_or_default(Right const& key) const {
+    Left at_right_or_default(Right const& key) const noexcept {
         n_ptr ptr = to_n_ptr(r_tree.find(key));
-        return ptr ? ptr->left_t::get_value() : end_left();
+        return ptr ? ptr->left_t::get_value() : Left();
     }
 
-    left_iterator lower_bound_left(const Left& left) const {
+    left_iterator lower_bound_left(const Left& left) const noexcept {
         return l_tree.lower_bound(left);
     }
 
-    left_iterator upper_bound_left(const Left& left) const {
+    left_iterator upper_bound_left(const Left& left) const noexcept {
         return l_tree.upper_bound(left);
     }
 
-    right_iterator lower_bound_right(const Right& right) const {
+    right_iterator lower_bound_right(const Right& right) const noexcept {
         return r_tree.lower_bound(right);
     }
 
-    right_iterator upper_bound_right(const Right& right) const {
+    right_iterator upper_bound_right(const Right& right) const noexcept {
         return r_tree.upper_bound(right);
     }
 
-    left_iterator begin_left() const {
+    left_iterator begin_left() const noexcept {
         return l_tree.get_begin();
     }
 
-    left_iterator end_left() const {
+    left_iterator end_left() const noexcept {
         return l_tree.get_end();
     }
 
-    right_iterator begin_right() const {
+    right_iterator begin_right() const noexcept {
         return r_tree.get_begin();
     }
 
-    right_iterator end_right() const {
+    right_iterator end_right() const noexcept {
         return r_tree.get_end();
     }
 
-    bool empty() const {
+    bool empty() const noexcept {
         return l_tree.empty();
     }
 
-    std::size_t size() const {
+    std::size_t size() const noexcept {
         return bimap_size;
     }
 
-    friend bool operator==(bimap const& a, bimap const& b) {
+    friend bool operator==(bimap const& a, bimap const& b) noexcept {
         if (a.size() != b.size()) {
             return false;
         }
@@ -525,7 +527,7 @@ struct bimap {
         return true;
     }
 
-    friend bool operator!=(bimap const& a, bimap const& b) {
+    friend bool operator!=(bimap const& a, bimap const& b) noexcept {
         return !(a == b);
     }
 
