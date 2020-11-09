@@ -1,4 +1,5 @@
 #pragma once
+#include <cassert>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -124,7 +125,7 @@ namespace {
                 cur = cur->p;
                 assert(cur->p);
             }
-            return cur->p;
+            return cur->p.lock();
         }
 
         static s_ptr next(s_ptr cur) noexcept {
@@ -257,27 +258,27 @@ namespace {
         using ptr = std::shared_ptr<node_t>;
         using tree_t = tree<T, Tag, Comp>;
 
-        base_iterator(ptr node) : node(node) {}
+        base_iterator(ptr node) : it_node(node) {}
 
         T const& operator*() const noexcept {
-            return node->get_value();
+            return it_node->get_value();
         }
 
     protected:
         template<typename Iterator, typename Ptr>
         static Iterator prefix_transform(Iterator& cur, std::function<Ptr (Ptr)> transformer) {
             Iterator old(cur);
-            cur.node = transformer(cur.node);
+            cur.it_node = transformer(cur.it_node);
             return old;
         }
 
         template<typename Iterator, typename Ptr>
         static Iterator& postfix_transform(Iterator& cur, std::function<Ptr (Ptr)> transformer) {
-            cur.node = transformer(cur.node);
+            cur.it_node = transformer(cur.it_node);
             return cur;
         }
 
-        ptr node;
+        ptr it_node;
     };
 }
 
@@ -299,8 +300,7 @@ struct bimap {
         using base = base_iterator<Right, right_tag, CompareRight>;
         using tree_t = tree<Right, right_tag, CompareRight>;
 
-        template<typename L, typename R, typename CL, typename CR>
-        friend struct bimap;
+        friend struct bimap<Left, Right, CompareLeft, CompareRight>;
 
         right_iterator(r_ptr node) : base(node) {}
 
@@ -321,7 +321,7 @@ struct bimap {
         }
 
         friend bool operator==(right_iterator const& a, right_iterator const& b) {
-            return a.base::node == b.base::node;
+            return a.base::it_node == b.base::it_node;
         }
 
         friend bool operator!=(right_iterator const& a, right_iterator const& b) {
@@ -329,7 +329,7 @@ struct bimap {
         }
 
         left_iterator flip() const noexcept {
-            return bimap::flip(base::node);
+            return bimap::flip(base::it_node);
         }
     };
 
@@ -338,8 +338,7 @@ struct bimap {
         using base = base_iterator<Left, left_tag, CompareLeft>;
         using tree_t = tree<Left, left_tag, CompareLeft>;
 
-        template<typename L, typename R, typename CL, typename CR>
-        friend struct bimap;
+        friend struct bimap<Left, Right, CompareLeft, CompareRight>;
 
         left_iterator(l_ptr node) : base(node) {}
 
@@ -360,7 +359,7 @@ struct bimap {
         }
 
         friend bool operator==(left_iterator const& a, left_iterator const& b) {
-            return a.base::node == b.base::node;
+            return a.base::it_node == b.base::it_node;
         }
 
         friend bool operator!=(left_iterator const& a, left_iterator const& b) {
@@ -368,7 +367,7 @@ struct bimap {
         }
 
         right_iterator flip() const noexcept {
-            return bimap::flip(base::node);
+            return bimap::flip(base::it_node);
         }
     };
 
@@ -411,7 +410,7 @@ struct bimap {
     left_iterator erase_left(left_iterator it) {
         left_iterator res = it;
         res++;
-        erase(to_n_ptr(it.node));
+        erase(to_n_ptr(it.it_node));
         return res;
     }
 
@@ -426,7 +425,7 @@ struct bimap {
     right_iterator erase_right(right_iterator it) {
         right_iterator res = it;
         res++;
-        erase(to_n_ptr(it.node));
+        erase(to_n_ptr(it.it_node));
         return res;
     }
 
@@ -533,22 +532,22 @@ struct bimap {
     left_iterator erase_left(left_iterator first, left_iterator last) {
         for (auto it = first; it != last;) {
             bimap_size--;
-            auto ptr = flip(it.node);
+            auto ptr = flip(it.it_node);
             it++;
             r_tree.erase(ptr);
         }
-        l_tree.erase_range(first.node, last.node);
+        l_tree.erase_range(first.it_node, last.it_node);
         return last;
     }
 
     right_iterator erase_right(right_iterator first, right_iterator last) {
         for (auto it = first; it != last;) {
             bimap_size--;
-            auto ptr = flip(it.node);
+            auto ptr = flip(it.it_node);
             it++;
             l_tree.erase(ptr);
         }
-        r_tree.erase_range(first.node, last.node);
+        r_tree.erase_range(first.it_node, last.it_node);
         return last;
     }
 
@@ -561,7 +560,7 @@ struct bimap {
 private:
     void copy(bimap const& other) {
         for (auto it = other.begin_left(); it != other.end_left(); it++) {
-            n_ptr ptr = to_n_ptr(it.node);
+            n_ptr ptr = to_n_ptr(it.it_node);
             insert(ptr->left_t::get_value(), ptr->right_t::get_value());
         }
     }
