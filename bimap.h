@@ -462,12 +462,24 @@ struct bimap {
 
     Right at_left_or_default(Left const& key) const noexcept {
         bi_ptr ptr = to_n_ptr(l_tree.find(key));
-        return ptr ? ptr->r_node::get_value() : Right();
+        if (ptr) {
+            return ptr->r_node::get_value();
+        } else if constexpr (std::is_constructible_v<Right>) {
+            return Right();
+        } else {
+            throw std::runtime_error("No default value");
+        }
     }
 
     Left at_right_or_default(Right const& key) const noexcept {
         bi_ptr ptr = to_n_ptr(r_tree.find(key));
-        return ptr ? ptr->l_node::get_value() : Left();
+        if (ptr) {
+            return ptr->l_node::get_value();
+        } else if constexpr (std::is_constructible_v<Left>) {
+            return Left();
+        } else {
+            throw std::runtime_error("No default value");
+        }
     }
 
     left_iterator lower_bound_left(const Left& left) const noexcept {
