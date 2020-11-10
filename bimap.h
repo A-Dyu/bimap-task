@@ -460,7 +460,7 @@ struct bimap {
         return ptr->l_node::get_value();
     }
 
-    Right at_left_or_default(Left const& key) const noexcept {
+    Right at_left_or_default(Left const& key) const noexcept(std::is_default_constructible_v<Right>) {
         bi_ptr ptr = to_n_ptr(l_tree.find(key));
         if (ptr) {
             return ptr->r_node::get_value();
@@ -471,7 +471,7 @@ struct bimap {
         }
     }
 
-    Left at_right_or_default(Right const& key) const noexcept {
+    Left at_right_or_default(Right const& key) const noexcept(std::is_default_constructible_v<Left>) {
         bi_ptr ptr = to_n_ptr(r_tree.find(key));
         if (ptr) {
             return ptr->l_node::get_value();
