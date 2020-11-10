@@ -464,7 +464,7 @@ struct bimap {
         bi_ptr ptr = to_n_ptr(l_tree.find(key));
         if (ptr) {
             return ptr->r_node::get_value();
-        } else if constexpr (std::is_constructible_v<Right>) {
+        } else if constexpr (std::is_default_constructible_v<Right>) {
             return Right();
         } else {
             throw std::runtime_error("No default value");
@@ -475,7 +475,7 @@ struct bimap {
         bi_ptr ptr = to_n_ptr(r_tree.find(key));
         if (ptr) {
             return ptr->l_node::get_value();
-        } else if constexpr (std::is_constructible_v<Left>) {
+        } else if constexpr (std::is_default_constructible_v<Left>) {
             return Left();
         } else {
             throw std::runtime_error("No default value");
