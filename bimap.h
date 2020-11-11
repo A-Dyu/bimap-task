@@ -460,27 +460,31 @@ struct bimap {
         return ptr->l_node::get_value();
     }
 
-    Right at_left_or_default(Left const& key) const noexcept(std::is_default_constructible_v<Right>) {
+    template<typename U = Right, typename = std::enable_if_t<std::is_default_constructible_v<U>>>
+    Right at_left_or_default(Left const& key) noexcept {
         bi_ptr ptr = to_n_ptr(l_tree.find(key));
         if (ptr) {
             return ptr->r_node::get_value();
-        } else if constexpr (std::is_default_constructible_v<Right>) {
-            return Right();
         } else {
-            throw std::runtime_error("No default value");
+            return *insert(key, Right()).flip();
         }
     }
 
-    Left at_right_or_default(Right const& key) const noexcept(std::is_default_constructible_v<Left>) {
+    template<typename U>
+    Right at_left_or_default(Left const&) = delete;
+
+    template<typename U = Left, typename = std::enable_if_t<std::is_default_constructible_v<U>>>
+    Left at_right_or_default(Right const& key) noexcept {
         bi_ptr ptr = to_n_ptr(r_tree.find(key));
         if (ptr) {
             return ptr->l_node::get_value();
-        } else if constexpr (std::is_default_constructible_v<Left>) {
-            return Left();
         } else {
-            throw std::runtime_error("No default value");
+            return *insert(Left(), key);
         }
     }
+
+    template<typename U>
+    Left at_right_or_default(Right const&) = delete;
 
     left_iterator lower_bound_left(const Left& left) const noexcept {
         return l_tree.lower_bound(left);
