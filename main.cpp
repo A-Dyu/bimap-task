@@ -7,14 +7,12 @@ struct test_object {
     int a = 0;
     test_object() = default;
     explicit test_object(int b) : a(b) {}
-    test_object(test_object&& other) noexcept {
-        std::swap(a, other.a);
+    test_object(test_object &&other) noexcept { std::swap(a, other.a); }
+    friend bool operator<(test_object const &c, test_object const &b) {
+        return c.a < b.a;
     }
-    friend bool operator<(test_object const& a, test_object const& b) {
-        return a.a < b.a;
-    }
-    friend bool operator==(test_object const& a, test_object const& b) {
-        return a.a == b.a;
+    friend bool operator==(test_object const &c, test_object const &b) {
+        return c.a == b.a;
     }
 };
 
@@ -146,9 +144,9 @@ TEST(bimap, erase_value) {
 
     b.insert(111, 222);
     b.insert(333, 444);
-    EXPECT_EQ(b.erase_left(111), 1);
+    EXPECT_TRUE(b.erase_left(111));
     EXPECT_EQ(b.size(), 1);
-    EXPECT_EQ(b.erase_right(333333), 0);
+    EXPECT_FALSE(b.erase_right(333333));
     EXPECT_EQ(b.size(), 1);
 }
 
@@ -180,15 +178,10 @@ TEST(bimap, lower_bound) {
     bimap<int, int> b;
 
     std::vector<std::pair<int, int>> data = {
-            {1,  2},
-            {2,  3},
-            {3,  4},
-            {8,  16},
-            {32, 66}
-    };
+            {1, 2}, {2, 3}, {3, 4}, {8, 16}, {32, 66}};
 
     std::shuffle(data.begin(), data.end(), std::random_device{});
-    for (auto const& p : data) {
+    for (auto const &p : data) {
         b.insert(p.first, p.second);
     }
 
@@ -203,15 +196,10 @@ TEST(bimap, upper_bound) {
     bimap<int, int> b;
 
     std::vector<std::pair<int, int>> data = {
-            {1,  2},
-            {2,  3},
-            {3,  4},
-            {8,  16},
-            {32, 66}
-    };
+            {1, 2}, {2, 3}, {3, 4}, {8, 16}, {32, 66}};
 
     std::shuffle(data.begin(), data.end(), std::random_device{});
-    for (auto const& p : data) {
+    for (auto const &p : data) {
         b.insert(p.first, p.second);
     }
 
@@ -221,8 +209,9 @@ TEST(bimap, upper_bound) {
     EXPECT_EQ(b.upper_bound_left(400), b.end_left());
 }
 
-template<typename T>
-std::vector<std::pair<T, T>> eliminate_same(std::vector<T>& lefts, std::vector<T>& rights, std::mt19937& e) {
+template <typename T>
+std::vector<std::pair<T, T>>
+eliminate_same(std::vector<T> &lefts, std::vector<T> &rights, std::mt19937 &e) {
     // std::sort(lefts.begin(), lefts.end());
     auto last = std::unique(lefts.begin(), lefts.end());
     lefts.erase(last, lefts.end());
@@ -276,7 +265,8 @@ TEST(bimap_randomized, comparison) {
 }
 
 TEST(bimap_randomized, invariant_check) {
-    std::cout << "Seed used for randomized invariant test is " << seed << std::endl;
+    std::cout << "Seed used for randomized invariant test is " << seed
+              << std::endl;
     bimap<int, int> b;
 
     std::mt19937 e(seed);
@@ -311,8 +301,8 @@ TEST(bimap_randomized, invariant_check) {
         }
     }
     std::cout << "Invariant check stats:" << std::endl;
-    std::cout << "Performed " << ins << " insertions and " << total - ins - skip << " erasures. "
-              << skip << " skipped." << std::endl;
+    std::cout << "Performed " << ins << " insertions and " << total - ins - skip
+              << " erasures. " << skip << " skipped." << std::endl;
 }
 
 TEST(bimap_randomized, compare_to_two_maps) {
@@ -347,18 +337,18 @@ TEST(bimap_randomized, compare_to_two_maps) {
             b.erase_left(it);
         }
         if (i % 100 == 0) {
-            //check
+            // check
             EXPECT_EQ(b.size(), left_view.size());
             EXPECT_EQ(b.size(), right_view.size());
             auto lit = b.begin_left();
             auto mlit = left_view.begin();
-            for (; lit != b.end_left()&&  mlit != left_view.end(); lit++, mlit++) {
+            for (; lit != b.end_left() && mlit != left_view.end(); lit++, mlit++) {
                 EXPECT_EQ(*lit, mlit->first);
                 EXPECT_EQ(*lit.flip(), mlit->second);
             }
         }
     }
     std::cout << "Comparing to maps stat:" << std::endl;
-    std::cout << "Performed " << ins << " insertions and " << total - ins - skip << " erasures. "
-              << skip << " skipped." << std::endl;
+    std::cout << "Performed " << ins << " insertions and " << total - ins - skip
+              << " erasures. " << skip << " skipped." << std::endl;
 }

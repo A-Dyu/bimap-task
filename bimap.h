@@ -36,6 +36,10 @@ namespace {
             return value.value();
         }
 
+        void set_value(T const& val) {
+            value = val;
+        };
+
         std::shared_ptr<node<T, Tag>> left;
         std::shared_ptr<node<T, Tag>> right;
         std::weak_ptr<node<T, Tag>> p;
@@ -58,12 +62,12 @@ namespace {
         using w_ptr = std::weak_ptr<node_t>;
         using s_pair = std::pair<s_ptr, s_ptr>;
 
-        tree(s_ptr end) noexcept : head(end), begin(end), end(end) {}
+        tree(s_ptr end, Comp comp) noexcept : comp(comp), head(end), begin(end), end(end) {}
 
         s_ptr find(T const& val) const noexcept {
             s_ptr t = head;
             while (t && (is_valuable(t) || t->left || t->right)) {
-                if (is_valuable(t) && t->get_value() == val) {
+                if (is_valuable(t) && equal(t->get_value(), val)) {
                     return t;
                 } else if (!is_valuable(t) || comp(val, t->get_value())) {
                     t = t->left;
@@ -162,16 +166,17 @@ namespace {
             return end;
         }
 
-        template<typename L, typename R, typename CL, typename CR>
-        friend struct bimap;
+        Comp comp;
 
-    private:
-        static constexpr Comp comp = Comp();
-
-        static constexpr auto up_comp = [](T const& a, T const& b) {
-            return comp(a, b) || a == b;
+        std::function<bool (T const&, T const&)> up_comp = [&](T const& a, T const& b) {
+            return !(comp(b, a));
         };
 
+        bool equal(T const& a, T const& b) const noexcept {
+            return !comp(a, b) && !comp(b, a);
+        }
+
+    private:
         template<typename F>
         static s_ptr bound(s_ptr ptr, T const& val, F const& bound_comp) noexcept {
             if (!ptr) {
@@ -366,7 +371,7 @@ struct bimap {
         }
     };
 
-    bimap() noexcept : l_tree(to_l_ptr(std::make_shared<bi_node>())), r_tree(flip(l_tree.get_end())), bimap_size(0) {}
+    bimap(CompareLeft cmpL = CompareLeft(), CompareRight cmpR = CompareRight()) noexcept : l_tree(to_l_ptr(std::make_shared<bi_node>()), cmpL), r_tree(flip(l_tree.get_end()), cmpR), bimap_size(0) {}
 
     bimap(bimap const& other): bimap() {
         copy(other);
@@ -392,10 +397,34 @@ struct bimap {
         return *this;
     }
 
-    template<typename L, typename R,
-            typename = std::enable_if<std::is_same_v<std::decay_t<L>, Left>>,
-            typename = std::enable_if<std::is_same_v<std::decay_t<R>, Right>>>
-    left_iterator insert(L l_val, R r_val) noexcept {
+    left_iterator insert(Left const& l_val, Right const& r_val) noexcept {
+        if (find_left(l_val) != end_left() || find_right(r_val) != end_right()) {
+            return end_left();
+        }
+        bi_ptr new_elem = std::make_shared<bi_node>(l_val, r_val);
+        insert(new_elem);
+        return to_l_ptr(new_elem);
+    }
+
+    left_iterator insert(Left&& l_val, Right const& r_val) noexcept {
+        if (find_left(l_val) != end_left() || find_right(r_val) != end_right()) {
+            return end_left();
+        }
+        bi_ptr new_elem = std::make_shared<bi_node>(std::move(l_val), r_val);
+        insert(new_elem);
+        return to_l_ptr(new_elem);
+    }
+
+    left_iterator insert(Left const& l_val, Right&& r_val) noexcept {
+        if (find_left(l_val) != end_left() || find_right(r_val) != end_right()) {
+            return end_left();
+        }
+        bi_ptr new_elem = std::make_shared<bi_node>(l_val, std::move(r_val));
+        insert(new_elem);
+        return to_l_ptr(new_elem);
+    }
+
+    left_iterator insert(Left&& l_val, Right&& r_val) noexcept {
         if (find_left(l_val) != end_left() || find_right(r_val) != end_right()) {
             return end_left();
         }
@@ -466,7 +495,14 @@ struct bimap {
         if (ptr) {
             return ptr->r_node::get_value();
         } else {
-            return *insert(key, Right()).flip();
+            Right def = Right();
+            r_ptr pd = r_tree.find(def);
+            if (!pd) {
+                return *insert(key, std::move(def)).flip();
+            } else {
+                flip(pd)->set_value(key);
+                return def;
+            }
         }
     }
 
@@ -479,7 +515,14 @@ struct bimap {
         if (ptr) {
             return ptr->l_node::get_value();
         } else {
-            return *insert(Left(), key);
+            Left def = Left();
+            l_ptr pd = l_tree.find(def);
+            if (!pd) {
+                return *insert(std::move(def), key);
+            } else {
+                flip(pd)->set_value(key);
+                return def;
+            }
         }
     }
 
@@ -531,7 +574,7 @@ struct bimap {
             return false;
         }
         for (auto it1 = a.begin_left(), it2 = b.begin_left(); it1 != a.end_left(); it1++, it2++) {
-            if (*it1 != *it2 || *it1.flip() != *it2.flip()) {
+            if (!a.l_tree.equal(*it1, *it2) || !a.r_tree.equal(*it1.flip(), *it2.flip())) {
                 return false;
             }
         }
