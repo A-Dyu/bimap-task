@@ -23,10 +23,10 @@ namespace {
 
     template<typename T, typename Tag>
     struct node : virtual priority {
-        node() = default;
+        node() : left(nullptr), right(nullptr), p(nullptr), value() {}
 
         template<typename Y>
-        explicit node(Y val) : value(std::move(val)) {}
+        explicit node(Y val) : left(nullptr), right(nullptr), p(nullptr), value(std::move(val)) {}
 
         bool has_value() const noexcept {
             return value.has_value();
@@ -40,9 +40,9 @@ namespace {
             value = val;
         };
 
-        std::shared_ptr<node<T, Tag>> left;
-        std::shared_ptr<node<T, Tag>> right;
-        std::weak_ptr<node<T, Tag>> p;
+        node<T, Tag>* left;
+        node<T, Tag>* right;
+        node<T, Tag>* p;
     private:
         std::optional<T> value;
     };
@@ -58,14 +58,12 @@ namespace {
     template<typename T, typename Tag, typename Comp>
     struct tree {
         using node_t = node<T, Tag>;
-        using s_ptr = std::shared_ptr<node_t>;
-        using w_ptr = std::weak_ptr<node_t>;
-        using s_pair = std::pair<s_ptr, s_ptr>;
+        using ptr_pair = std::pair<node_t*, node_t*>;
 
-        tree(s_ptr end, Comp comp) noexcept : comp(comp), head(end), begin(end), end(end) {}
+        tree(node_t* end, Comp comp) noexcept : comp(comp), head(end), begin(end), end(end) {}
 
-        s_ptr find(T const& val) const noexcept {
-            s_ptr t = head;
+        node_t* find(T const& val) const noexcept {
+            node_t* t = head;
             while (t && (is_valuable(t) || t->left || t->right)) {
                 if (is_valuable(t) && equal(t->get_value(), val)) {
                     return t;
@@ -78,40 +76,46 @@ namespace {
             return nullptr;
         }
 
-        void insert(s_ptr new_val) noexcept {
+        void insert(node_t* new_val) noexcept {
             if (!is_valuable(begin) || comp(new_val->get_value(), begin->get_value())) {
                 begin = new_val;
             }
-            s_pair nodes = split(head, new_val->get_value(), comp);
+            ptr_pair nodes = split<false>(head, new_val->get_value());
             nodes.first = merge(nodes.first, new_val);
             head = merge(nodes.first, nodes.second);
         }
 
-        void erase(s_ptr elem) noexcept {
+        void erase(node_t* elem) noexcept {
             if (begin == elem) {
                 begin = next(begin);
             }
-            s_pair nodes1 = split(head, elem->get_value(), comp);
-            s_pair nodes2 = split(nodes1.second, elem->get_value(), up_comp);
+            ptr_pair nodes1 = split<false>(head, elem->get_value());
+            ptr_pair nodes2 = split<true>(nodes1.second, elem->get_value());
             head = merge(nodes1.first, nodes2.second);
         }
 
-        void erase_range(s_ptr first, s_ptr last) noexcept {
+        template<typename Delete_type>
+        void erase_range(node_t* first, node_t* last) noexcept {
             if (begin == first) {
                 begin = last;
             }
-            s_pair nodes1 = split(head, first->get_value(), comp);
+            ptr_pair nodes1 = split<false>(head, first->get_value());
             if (last != end) {
-                s_pair nodes2 = split(nodes1.second, last->get_value(), comp);
+                ptr_pair nodes2 = split<false>(nodes1.second, last->get_value());
                 head = merge(nodes1.first, nodes2.second);
+                destroy<Delete_type>(nodes2.first);
             } else {
                 clear_parents(end);
                 end->left = nullptr;
+                if (end->p) {
+                    (end->p->left == end ? end->p->left : end->p->right) = nullptr;
+                }
                 head = merge(nodes1.first, end);
+                destroy<Delete_type>(nodes1.second);
             }
         }
 
-        static s_ptr prev(s_ptr cur) noexcept {
+        static node_t* prev(node_t* cur) noexcept {
             if (cur->left) {
                 cur = cur->left;
                 while (cur->right) {
@@ -123,10 +127,10 @@ namespace {
                 cur = cur->p;
                 assert(cur->p);
             }
-            return cur->p.lock();
+            return cur->p;
         }
 
-        static s_ptr next(s_ptr cur) noexcept {
+        static node_t* next(node_t* cur) noexcept {
             assert(cur->has_value());
             if (cur->right) {
                 cur = cur->right;
@@ -135,84 +139,102 @@ namespace {
                 }
                 return cur;
             }
-            while (cur->p.lock()->left != cur) {
-                cur = cur->p.lock();
+            while (cur->p->left != cur) {
+                cur = cur->p;
             }
-            return cur->p.lock();
+            return cur->p;
         }
 
         void swap(tree& other) noexcept {
             std::swap(head, other.head);
+            std::swap(begin, other.begin);
             std::swap(end, other.head);
         }
 
-        s_ptr lower_bound(T const& val) const noexcept {
-            return bound(head, val, comp);
+        node_t* lower_bound(T const& val) const noexcept {
+            return bound<false>(head, val);
         }
 
-        s_ptr upper_bound(T const& val) const noexcept {
-            return bound(head, val, up_comp);
+        node_t* upper_bound(T const& val) const noexcept {
+            return bound<true>(head, val);
         }
 
         bool empty() const noexcept {
             return begin == end;
         }
 
-        s_ptr get_begin() const noexcept {
+        node_t* get_begin() const noexcept {
             return begin;
         }
 
-        s_ptr get_end() const noexcept {
+        node_t* get_end() const noexcept {
             return end;
         }
-
-        Comp comp;
-
-        std::function<bool (T const&, T const&)> up_comp = [&](T const& a, T const& b) {
-            return !(comp(b, a));
-        };
 
         bool equal(T const& a, T const& b) const noexcept {
             return !comp(a, b) && !comp(b, a);
         }
 
+        template<typename Delete_type>
+        void destroy() {
+            destroy<Delete_type>(head);
+        }
+
+        Comp comp;
+
+        bool up_comp(T const& a, T const& b) const {
+            return !(comp(b, a));
+        }
+
     private:
-        template<typename F>
-        static s_ptr bound(s_ptr ptr, T const& val, F const& bound_comp) noexcept {
+        template<bool Is_up_comp>
+        node_t* bound(node_t* ptr, T const& val) const noexcept {
             if (!ptr) {
                 return nullptr;
             }
-            if (!is_valuable(ptr) || !bound_comp(ptr->get_value(), val)) {
-                s_ptr l_bound = bound(ptr->left, val, bound_comp);
+            bool comp_res;
+            if constexpr (Is_up_comp) {
+                comp_res = !is_valuable(ptr) || !up_comp(ptr->get_value(), val);
+            } else {
+                comp_res = !is_valuable(ptr) || !comp(ptr->get_value(), val);
+            }
+            if (comp_res) {
+                node_t* l_bound = bound<Is_up_comp>(ptr->left, val);
                 if (l_bound) {
                     return l_bound;
                 } else {
                     return ptr;
                 }
             }
-            return bound(ptr->right, val, bound_comp);
+            return bound<Is_up_comp>(ptr->right, val);
         }
 
-        template<typename F>
-        static s_pair split(s_ptr t, T const& val, F const& split_comp) noexcept {
+        template<bool Is_up_comp>
+        ptr_pair split(node_t* t, T const& val) noexcept {
             if (!t) {
                 return {nullptr, nullptr};
             }
             clear_parents(t);
-            if (is_valuable(t) && split_comp(t->get_value(), val)) {
-                s_pair res = split(t->right, val, split_comp);
+            bool comp_res;
+            if constexpr (Is_up_comp) {
+            comp_res = is_valuable(t) && up_comp(t->get_value(), val);
+            } else {
+            comp_res = is_valuable(t) && comp(t->get_value(), val);
+            }
+            if (comp_res) {
+                ptr_pair res = split<Is_up_comp>(t->right, val);
                 t->right = res.first;
                 ensure_parents(t);
                 return {t, res.second};
             } else {
-                s_pair res = split(t->left, val, split_comp);
+                ptr_pair res = split<Is_up_comp>(t->left, val);
                 t->left = res.second;
                 ensure_parents(t);
                 return {res.first, t};
             }
         }
 
-        static s_ptr merge(s_ptr l, s_ptr r) noexcept {
+        node_t* merge(node_t* l, node_t* r) noexcept {
             if (!l) {
                 return r;
             }
@@ -230,11 +252,11 @@ namespace {
             }
         }
 
-        static bool is_valuable(s_ptr t) noexcept {
+        static bool is_valuable(node_t* t) noexcept {
             return t && t->has_value();
         }
 
-        static void ensure_parents(s_ptr t) noexcept {
+        static void ensure_parents(node_t* t) noexcept {
             if (t->left) {
                 t->left->p = t;
             }
@@ -243,27 +265,36 @@ namespace {
             }
         }
 
-        static void clear_parents(s_ptr t) noexcept {
+        static void clear_parents(node_t* t) noexcept {
             if (t->left) {
-                t->left->p = w_ptr();
+                t->left->p = nullptr;
             }
             if (t->right) {
-                t->right->p = w_ptr();
+                t->right->p = nullptr;
             }
         }
 
-        s_ptr head;
-        s_ptr begin;
-        s_ptr end;
+        template<typename Delete_type>
+        static void destroy(node_t* ptr) {
+            if (!ptr) {
+                return;
+            }
+            destroy<Delete_type>(ptr->left);
+            destroy<Delete_type>(ptr->right);
+            delete static_cast<Delete_type>(ptr);
+        }
+
+        node_t* head;
+        node_t* begin;
+        node_t* end;
     };
 
     template<typename T, typename Tag, typename Comp>
     struct base_iterator {
         using node_t = node<T, Tag>;
-        using ptr = std::shared_ptr<node_t>;
         using tree_t = tree<T, Tag, Comp>;
 
-        base_iterator(ptr node) noexcept : it_node(node) {}
+        base_iterator(node_t* node) noexcept : it_node(node) {}
 
         T const& operator*() const noexcept {
             return it_node->get_value();
@@ -283,7 +314,7 @@ namespace {
             return cur;
         }
 
-        ptr it_node;
+        node_t* it_node;
     };
 }
 
@@ -302,22 +333,28 @@ struct bimap {
 
         friend struct bimap<Left, Right, CompareLeft, CompareRight>;
 
-        right_iterator(std::shared_ptr<node<Right, right_tag>> node) noexcept : base(node) {}
+        right_iterator(node<Right, right_tag>* node) noexcept : base(node) {}
 
         right_iterator& operator++() noexcept {
-            return base::template postfix_transform<right_iterator, r_ptr>(*this, tree_t::next);
+            base::it_node = tree_t::next(base::it_node);
+            return *this;
         }
 
         right_iterator operator++(int) noexcept {
-            return base::template prefix_transform<right_iterator, r_ptr>(*this, tree_t::next);
+            auto old = *this;
+            ++(*this);
+            return old;
         }
 
         right_iterator& operator--() noexcept {
-            return base::template postfix_transform<right_iterator, r_ptr>(*this, tree_t::prev);
+            base::it_node = tree_t::prev(base::it_node);
+            return *this;
         }
 
         right_iterator operator--(int) noexcept {
-            return base::template prefix_transform<right_iterator, r_ptr>(*this, tree_t::prev);
+            auto old = *this;
+            --(*this);
+            return old;
         }
 
         friend bool operator==(right_iterator const& a, right_iterator const& b) {
@@ -329,7 +366,7 @@ struct bimap {
         }
 
         left_iterator flip() const noexcept {
-            return bimap::flip(base::it_node);
+            return static_cast<bi_node*>(base::it_node);
         }
     };
 
@@ -340,22 +377,28 @@ struct bimap {
 
         friend struct bimap<Left, Right, CompareLeft, CompareRight>;
 
-        left_iterator(std::shared_ptr<node<Left, left_tag>> node) noexcept : base(node) {}
+        left_iterator(node<Left, left_tag>* node) noexcept : base(node) {}
 
         left_iterator& operator++() noexcept {
-            return base::template postfix_transform<left_iterator, l_ptr>(*this, tree_t::next);
+            base::it_node = tree_t::next(base::it_node);
+            return *this;
         }
 
         left_iterator operator++(int) noexcept {
-            return base::template prefix_transform<left_iterator, l_ptr>(*this, tree_t::next);
+            auto old = *this;
+            ++(*this);
+            return old;
         }
 
         left_iterator& operator--() noexcept {
-            return base::template postfix_transform<left_iterator, l_ptr>(*this, tree_t::prev);
+            base::it_node = tree_t::prev(base::it_node);
+            return *this;
         }
 
         left_iterator operator--(int) noexcept {
-            return base::template prefix_transform<left_iterator, l_ptr>(*this, tree_t::prev);
+            auto old = *this;
+            --(*this);
+            return old;
         }
 
         friend bool operator==(left_iterator const& a, left_iterator const& b) {
@@ -367,11 +410,11 @@ struct bimap {
         }
 
         right_iterator flip() const noexcept {
-            return bimap::flip(base::it_node);
+            return static_cast<bi_node*>(base::it_node);
         }
     };
 
-    bimap(CompareLeft cmpL = CompareLeft(), CompareRight cmpR = CompareRight()) noexcept : l_tree(to_l_ptr(std::make_shared<bi_node>()), cmpL), r_tree(flip(l_tree.get_end()), cmpR), bimap_size(0) {}
+    bimap(CompareLeft cmpL = CompareLeft(), CompareRight cmpR = CompareRight()) noexcept : l_tree(new bi_node(), cmpL), r_tree(static_cast<bi_node*>(l_tree.get_end()), cmpR), bimap_size(0) {}
 
     bimap(bimap const& other): bimap() {
         copy(other);
@@ -381,18 +424,22 @@ struct bimap {
         swap(other);
     }
 
+    ~bimap() {
+        l_tree.template destroy<bi_node*>();
+    }
+
     bimap& operator=(bimap const& other) {
         if (this != &other) {
-            this->~bimap();
-            new(this) bimap(other);
+            bimap safe(other);
+            swap(safe);
         }
         return *this;
     }
 
     bimap& operator=(bimap&& other) noexcept {
         if (this != &other) {
-            this->~bimap();
-            new(this) bimap(std::move(other));
+            bimap safe(std::move(other));
+            swap(safe);
         }
         return *this;
     }
@@ -401,47 +448,47 @@ struct bimap {
         if (find_left(l_val) != end_left() || find_right(r_val) != end_right()) {
             return end_left();
         }
-        bi_ptr new_elem = std::make_shared<bi_node>(l_val, r_val);
+        auto* new_elem = new bi_node(l_val, r_val);
         insert(new_elem);
-        return to_l_ptr(new_elem);
+        return new_elem;
     }
 
     left_iterator insert(Left&& l_val, Right const& r_val) noexcept {
         if (find_left(l_val) != end_left() || find_right(r_val) != end_right()) {
             return end_left();
         }
-        bi_ptr new_elem = std::make_shared<bi_node>(std::move(l_val), r_val);
+        auto* new_elem = new bi_node(std::move(l_val), r_val);
         insert(new_elem);
-        return to_l_ptr(new_elem);
+        return new_elem;
     }
 
     left_iterator insert(Left const& l_val, Right&& r_val) noexcept {
         if (find_left(l_val) != end_left() || find_right(r_val) != end_right()) {
             return end_left();
         }
-        bi_ptr new_elem = std::make_shared<bi_node>(l_val, std::move(r_val));
+        auto* new_elem = new bi_node(l_val, std::move(r_val));
         insert(new_elem);
-        return to_l_ptr(new_elem);
+        return new_elem;
     }
 
     left_iterator insert(Left&& l_val, Right&& r_val) noexcept {
         if (find_left(l_val) != end_left() || find_right(r_val) != end_right()) {
             return end_left();
         }
-        bi_ptr new_elem = std::make_shared<bi_node>(std::move(l_val), std::move(r_val));
+        auto* new_elem = new bi_node(std::move(l_val), std::move(r_val));
         insert(new_elem);
-        return to_l_ptr(new_elem);
+        return new_elem;
     }
 
     left_iterator erase_left(left_iterator it) {
         left_iterator res = it;
         res++;
-        erase(to_n_ptr(it.it_node));
+        erase(static_cast<bi_node*>(it.it_node));
         return res;
     }
 
     bool erase_left(Left const& left) {
-        l_ptr ptr = l_tree.find(left);
+        l_node* ptr = l_tree.find(left);
         if (ptr) {
             erase_left(ptr);
         }
@@ -451,12 +498,12 @@ struct bimap {
     right_iterator erase_right(right_iterator it) {
         right_iterator res = it;
         res++;
-        erase(to_n_ptr(it.it_node));
+        erase(static_cast<bi_node*>(it.it_node));
         return res;
     }
 
     bool erase_right(Right const& right) {
-        r_ptr ptr = r_tree.find(right);
+        r_node* ptr = r_tree.find(right);
         if (ptr) {
             erase_right(ptr);
         }
@@ -464,17 +511,17 @@ struct bimap {
     }
 
     left_iterator find_left (Left const& left) const noexcept {
-        l_ptr ptr = l_tree.find(left);
+        l_node* ptr = l_tree.find(left);
         return ptr ? ptr : end_left();
     }
 
     right_iterator find_right(Right const& right) const noexcept {
-        r_ptr ptr = r_tree.find(right);
+        r_node* ptr = r_tree.find(right);
         return ptr ? ptr : end_right();
     }
 
     Right const& at_left(Left const& key) const {
-        bi_ptr ptr = to_n_ptr(l_tree.find(key));
+        auto* ptr = static_cast<bi_node*>(l_tree.find(key));
         if (!ptr) {
             throw std::out_of_range("No such key in bimap");
         }
@@ -482,7 +529,7 @@ struct bimap {
     }
 
     Left const& at_right(Right const& key) const {
-        bi_ptr ptr = to_n_ptr(r_tree.find(key));
+        auto* ptr = static_cast<bi_node*>(r_tree.find(key));
         if (!ptr) {
             throw std::out_of_range("No such key in bimap");
         }
@@ -491,43 +538,33 @@ struct bimap {
 
     template<typename U = Right, typename = std::enable_if_t<std::is_default_constructible_v<U>>>
     Right const& at_left_or_default(Left const& key) noexcept {
-        bi_ptr ptr = to_n_ptr(l_tree.find(key));
+        auto* ptr = static_cast<bi_node*>(l_tree.find(key));
         if (ptr) {
             return ptr->r_node::get_value();
         } else {
             Right def = Right();
-            r_ptr pd = r_tree.find(def);
-            if (!pd) {
-                return *insert(key, std::move(def)).flip();
-            } else {
-                flip(pd)->set_value(key);
-                return *right_iterator(pd);
+            r_node* pd = r_tree.find(def);
+            if (pd) {
+                erase(static_cast<bi_node*>(pd));
             }
+            return *insert(key, std::move(def)).flip();
         }
     }
 
-    template<typename U>
-    Right const& at_left_or_default(Left const&) = delete;
-
     template<typename U = Left, typename = std::enable_if_t<std::is_default_constructible_v<U>>>
     Left const& at_right_or_default(Right const& key) noexcept {
-        bi_ptr ptr = to_n_ptr(r_tree.find(key));
+        auto* ptr = static_cast<bi_node*>(r_tree.find(key));
         if (ptr) {
             return ptr->l_node::get_value();
         } else {
             Left def = Left();
-            l_ptr pd = l_tree.find(def);
-            if (!pd) {
-                return *insert(std::move(def), key);
-            } else {
-                flip(pd)->set_value(key);
-                return *left_iterator(pd);
+            l_node* pd = l_tree.find(def);
+            if (pd) {
+                erase(static_cast<bi_node*>(pd));
             }
+            return *insert(std::move(def), key);
         }
     }
-
-    template<typename U>
-    Left const& at_right_or_default(Right const&) = delete;
 
     left_iterator lower_bound_left(const Left& left) const noexcept {
         return l_tree.lower_bound(left);
@@ -565,7 +602,7 @@ struct bimap {
         return l_tree.empty();
     }
 
-    std::size_t size() const noexcept {
+    size_t size() const noexcept {
         return bimap_size;
     }
 
@@ -588,22 +625,22 @@ struct bimap {
     left_iterator erase_left(left_iterator first, left_iterator last) {
         for (auto it = first; it != last;) {
             bimap_size--;
-            auto ptr = flip(it.it_node);
+            r_node* ptr = static_cast<bi_node*>(it.it_node);
             it++;
             r_tree.erase(ptr);
         }
-        l_tree.erase_range(first.it_node, last.it_node);
+        l_tree.template erase_range<bi_node*>(first.it_node, last.it_node);
         return last;
     }
 
     right_iterator erase_right(right_iterator first, right_iterator last) {
         for (auto it = first; it != last;) {
             bimap_size--;
-            auto ptr = flip(it.it_node);
+            l_node* ptr = static_cast<bi_node*>(it.it_node);
             it++;
             l_tree.erase(ptr);
         }
-        r_tree.erase_range(first.it_node, last.it_node);
+        r_tree.template erase_range<bi_node*>(first.it_node, last.it_node);
         return last;
     }
 
@@ -618,51 +655,25 @@ private:
     using r_node = node<Right, right_tag>;
     using bi_node = binode<Left, Right>;
 
-    using l_ptr = std::shared_ptr<l_node>;
-    using r_ptr = std::shared_ptr<r_node>;
-    using bi_ptr = std::shared_ptr<bi_node>;
 
     void copy(bimap const& other) {
         for (auto it = other.begin_left(); it != other.end_left(); it++) {
-            bi_ptr ptr = to_n_ptr(it.it_node);
+            auto* ptr = static_cast<bi_node*>(it.it_node);
             insert(ptr->l_node::get_value(), ptr->r_node::get_value());
         }
     }
 
-    void erase(bi_ptr ptr) noexcept {
+    void erase(bi_node* ptr) noexcept {
         bimap_size--;
-        l_tree.erase(to_l_ptr(ptr));
-        r_tree.erase(to_r_ptr(ptr));
+        l_tree.erase(ptr);
+        r_tree.erase(ptr);
+        delete ptr;
     }
 
-    void insert(bi_ptr const& new_elem) noexcept {
+    void insert(bi_node* const& new_elem) noexcept {
         bimap_size++;
-        l_tree.insert(to_l_ptr(new_elem));
-        r_tree.insert(to_r_ptr(new_elem));
-    }
-
-    static l_ptr to_l_ptr(bi_ptr const& ptr) noexcept {
-        return ptr ? l_ptr(ptr, static_cast<l_node*>(&(*ptr))) : nullptr;
-    }
-
-    static r_ptr to_r_ptr(bi_ptr const& ptr) noexcept {
-        return ptr ? r_ptr(ptr, static_cast<r_node*>(&(*ptr))) : nullptr;
-    }
-
-    static bi_ptr to_n_ptr(l_ptr ptr) noexcept {
-        return ptr ? bi_ptr(ptr, static_cast<bi_node*>(&(*ptr))) : nullptr;
-    }
-
-    static bi_ptr to_n_ptr(r_ptr ptr) noexcept {
-        return ptr ? bi_ptr(ptr, static_cast<bi_node*>(&(*ptr))) : nullptr;
-    }
-
-    static l_ptr flip(r_ptr const& ptr) noexcept {
-        return to_l_ptr(to_n_ptr(ptr));
-    }
-
-    static r_ptr flip(l_ptr const& ptr) noexcept {
-        return to_r_ptr(to_n_ptr(ptr));
+        l_tree.insert(new_elem);
+        r_tree.insert(new_elem);
     }
 
     tree<Left, left_tag, CompareLeft> l_tree;

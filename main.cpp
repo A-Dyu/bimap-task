@@ -297,6 +297,23 @@ eliminate_same(std::vector<T> &lefts, std::vector<T> &rights, std::mt19937 &e) {
     return res;
 }
 
+struct non_default_constructible {
+  non_default_constructible() = delete;
+  explicit non_default_constructible(int b) : a(b) {}
+  non_default_constructible(non_default_constructible const &) = default;
+  friend bool operator<(non_default_constructible const &c, non_default_constructible const &b) {
+    return c.a < b.a;
+  }
+  friend bool operator==(non_default_constructible const &c, non_default_constructible const &b) {
+    return c.a == b.a;
+  }
+private:
+  int a;
+};
+
+template struct bimap<int, non_default_constructible>;
+template struct bimap<non_default_constructible, int>;
+
 static constexpr uint32_t seed = 1488228;
 
 TEST(bimap_randomized, comparison) {
